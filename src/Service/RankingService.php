@@ -10,7 +10,9 @@ class RankingService
     {
         $teams = $this->buildStats($matches);
 
-        return $this->resolveTie(array_values($teams), $matches);
+        usort($teams, fn($a, $b) => $b->points <=> $a->points);
+
+        return $this->resolveGroups(array_values($teams), $matches);
     }
 
     private function buildStats(array $matches): array
@@ -20,19 +22,18 @@ class RankingService
         foreach ($matches as $match) {
             $names = array_keys($match);
             [$a, $b] = $names;
-
             $scoreA = $match[$a];
             $scoreB = $match[$b];
 
-            $teams[$a] ??= new TeamStats();
-            $teams[$b] ??= new TeamStats();
-
-            $teams[$a]->name = $a;
-            $teams[$b]->name = $b;
+            foreach ([$a, $b] as $name) {
+                if (!isset($teams[$name])) {
+                    $teams[$name] = new TeamStats();
+                    $teams[$name]->name = $name;
+                }
+            }
 
             $teams[$a]->scored += $scoreA;
             $teams[$a]->conceded += $scoreB;
-
             $teams[$b]->scored += $scoreB;
             $teams[$b]->conceded += $scoreA;
 
@@ -52,41 +53,74 @@ class RankingService
         return $teams;
     }
 
+    private function resolveGroups(array $teams, array $matches): array
+    {
+        $result = [];
+        $grouped = [];
+
+        foreach ($teams as $t) {
+            $grouped[$t->points][] = $t;
+        }
+
+        krsort($grouped);
+
+        foreach ($grouped as $subgroup) {
+            if (count($subgroup) === 1) {
+                $result[] = $subgroup[0];
+            } else {
+                $resolved = $this->resolveTie($subgroup, $matches);
+
+                foreach ($resolved as $miniTeam) {
+                    foreach ($subgroup as $originalTeam) {
+                        if ($originalTeam->name === $miniTeam->name) {
+                            $result[] = $originalTeam;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $result;
+    }
+
     private function resolveTie(array $teams, array $matches): array
     {
-        usort($teams, fn($a, $b) => $b->points <=> $a->points);
+        if (count($teams) <= 1)
+            return $teams;
 
+        $mini = $this->miniTable($teams, $matches);
+
+        usort($mini, fn($a, $b) => $b->points <=> $a->points);
+        $groups = $this->groupBy($mini, fn($t) => $t->points);
+
+        if (count($groups) > 1)
+            return $this->processSubgroups($groups, $matches);
+
+        usort($mini, fn($a, $b) => $b->diff() <=> $a->diff());
+        $groups = $this->groupBy($mini, fn($t) => $t->diff());
+
+        if (count($groups) > 1)
+            return $this->processSubgroups($groups, $matches);
+
+        usort($mini, fn($a, $b) => $b->scored <=> $a->scored);
+        $groups = $this->groupBy($mini, fn($t) => $t->scored);
+
+        if (count($groups) > 1)
+            return $this->processSubgroups($groups, $matches);
+
+        shuffle($mini);
+
+        return $mini;
+    }
+
+    private function processSubgroups(array $groups, array $matches): array
+    {
         $result = [];
-        $groups = $this->groupByPoints($teams);
 
-        foreach ($groups as $group) {
-            if (count($group) === 1) {
-                $result[] = $group[0];
-                continue;
-            }
-
-            $mini = $this->miniTable($group, $matches);
-
-            usort($mini, function ($a, $b) {
-                return
-                    ($b->points <=> $a->points)
-                        ?: ($b->diff() <=> $a->diff())
-                        ?: ($b->scored <=> $a->scored);
-            });
-
-            $subGroups = $this->groupByCriteria($mini);
-
-            foreach ($subGroups as $sub) {
-                if (count($sub) > 1) {
-                    usort($sub, fn($a, $b) => ($b->diff() <=> $a->diff())
-                        ?: ($b->scored <=> $a->scored)
-                    );
-                }
-
-                foreach ($sub as $team) {
-                    $result[] = $team;
-                }
-            }
+        foreach ($groups as $subgroup) {
+            $resolved = $this->resolveTie($subgroup, $matches);
+            foreach ($resolved as $t) $result[] = $t;
         }
 
         return $result;
@@ -97,25 +131,21 @@ class RankingService
         $names = array_map(fn($t) => $t->name, $teams);
         $stats = [];
 
-        foreach ($teams as $t) {
-            $stats[$t->name] = new TeamStats();
-            $stats[$t->name]->name = $t->name;
+        foreach ($names as $name) {
+            $stats[$name] = new TeamStats();
+            $stats[$name]->name = $name;
         }
 
         foreach ($matches as $match) {
-            $keys = array_keys($match);
-            [$a, $b] = $keys;
+            [$a, $b] = array_keys($match);
 
-            if (!in_array($a, $names) || !in_array($b, $names)) {
-                continue;
-            }
+            if (!isset($stats[$a], $stats[$b])) continue;
 
             $scoreA = $match[$a];
             $scoreB = $match[$b];
 
             $stats[$a]->scored += $scoreA;
             $stats[$a]->conceded += $scoreB;
-
             $stats[$b]->scored += $scoreB;
             $stats[$b]->conceded += $scoreA;
 
@@ -127,28 +157,16 @@ class RankingService
                 $stats[$a]->points += 1;
             }
         }
-
         return array_values($stats);
     }
 
-    private function groupByPoints(array $teams): array
-    {
-        $groups = [];
-
-        foreach ($teams as $team) {
-            $groups[$team->points][] = $team;
-        }
-
-        return array_values($groups);
-    }
-
-    private function groupByCriteria(array $teams): array
+    private function groupBy(array $teams, callable $callback): array
     {
         $groups = [];
 
         foreach ($teams as $t) {
-            $key = $t->points . '_' . $t->diff() . '_' . $t->scored;
-            $groups[$key][] = $t;
+            $val = $callback($t);
+            $groups["$val"][] = $t;
         }
 
         return array_values($groups);

@@ -46,7 +46,7 @@
   ]
 }
 
-# przyklad 5 //failed
+# przyklad 5
 {
   "mecze": [
     { "A": 100, "B": 55 },
@@ -67,7 +67,7 @@
   ]
 }
 
-# przyklad 6 //failed
+# przyklad 6
 {
   "mecze": [
     { "A": 71, "B": 65 },
