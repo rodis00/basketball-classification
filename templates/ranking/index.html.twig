@@ -1,0 +1,34 @@
+<h1>Ranking drużyn</h1>
+
+<form method="post">
+    <textarea name="json" rows="15" cols="80"></textarea>
+    <br>
+    <button>Oblicz</button>
+</form>
+
+{% for message in app.flashes('error') %}
+    <div style="color:red">{{ message }}</div>
+{% endfor %}
+
+{% if result %}
+    <h2>Wynik</h2>
+    <table border="1">
+        <tr>
+            <th>#</th>
+            <th>Drużyna</th>
+            <th>Punkty</th>
+            <th>Kosze</th>
+            <th>Różnica</th>
+        </tr>
+
+        {% for team in result %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ team.name }}</td>
+                <td>{{ team.points }}</td>
+                <td>{{ team.scored }}:{{ team.conceded }}</td>
+                <td>{{ team.diff() }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
